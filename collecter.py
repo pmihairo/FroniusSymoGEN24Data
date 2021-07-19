@@ -3,6 +3,7 @@ import pprint
 import time
 import pandas as pd
 import sqlite3
+import logging
 
 # collector.py
 # This will connect to the Fronius Symo and log data to a sqlite
@@ -52,6 +53,15 @@ def GetPowerFlowRealtimeData():
     dataRq = '/solar_api/v1/GetPowerFlowRealtimeData.fcgi'
     return getData(hostname,dataRq)
 
+def GetMetersRealtimeData():
+    """
+    This request provides detailed information about the local energy grid from the meter.
+    The values replied represent the current state. Because of data has multiple
+    asynchrone origins it is a matter of facts that the sum of all
+    powers (grid, load and generate) will differ from zero.
+    """
+    dataRq = '/solar_api/v1/GetMeterRealtimeData.cgi?Scope=System'
+    return getData(hostname,dataRq)
 
 
 
@@ -83,6 +93,64 @@ def PowerFlowRealtimeData(jPFRD):
     return [Site, Inverters]
 
 
+def MetersRealtimeData(jPFRD):
+# Collect the Inverter Data
+# Does not include Optional Fields at this time
+    Meters = dict()
+# There could be more than 1 inverter here -  Bitcoin Miners :)
+    for i in jPFRD['Body']['Data']:
+        Meters['Timestamp'] = jPFRD['Head']['Timestamp']
+        Meters['DeviceId'] = i        
+        Meters['Current_L1'] = jPFRD['Body']['Data'][i]['ACBRIDGE_CURRENT_ACTIVE_MEAN_01_F32']
+        Meters['Current_L2'] = jPFRD['Body']['Data'][i]['ACBRIDGE_CURRENT_ACTIVE_MEAN_02_F32']
+        Meters['Current_L3'] = jPFRD['Body']['Data'][i]['ACBRIDGE_CURRENT_ACTIVE_MEAN_03_F32']
+        Meters['Current_Total'] = jPFRD['Body']['Data'][i]['ACBRIDGE_CURRENT_AC_SUM_NOW_F64']
+        Meters['Voltage_L12'] = jPFRD['Body']['Data'][i]['ACBRIDGE_VOLTAGE_MEAN_12_F32']
+        Meters['Voltage_L23'] = jPFRD['Body']['Data'][i]['ACBRIDGE_VOLTAGE_MEAN_23_F32']
+        Meters['Voltage_L31'] = jPFRD['Body']['Data'][i]['ACBRIDGE_VOLTAGE_MEAN_31_F32']
+        Meters['Comp_Mode_Enable_U16'] = jPFRD['Body']['Data'][i]['COMPONENTS_MODE_ENABLE_U16']
+        Meters['Comp_Mode_Visible_U16'] = jPFRD['Body']['Data'][i]['COMPONENTS_MODE_VISIBLE_U16']
+        Meters['Comp_TimeStamp'] = jPFRD['Body']['Data'][i]['COMPONENTS_TIME_STAMP_U64']
+        Meters['Manufacturer'] = jPFRD['Body']['Data'][i]['Details']['Manufacturer']
+        Meters['Model'] = jPFRD['Body']['Data'][i]['Details']['Model']
+        Meters['Serial'] = jPFRD['Body']['Data'][i]['Details']['Serial']
+        Meters['Grid_Frequency'] = jPFRD['Body']['Data'][i]['GRID_FREQUENCY_MEAN_F32']
+        Meters['EnergyActiveMinus'] = jPFRD['Body']['Data'][i]['SMARTMETER_ENERGYACTIVE_ABSOLUT_MINUS_F64']
+        Meters['EnergyActivePlus'] = jPFRD['Body']['Data'][i]['SMARTMETER_ENERGYACTIVE_ABSOLUT_PLUS_F64']
+        Meters['EnergyActiveConsumed'] = jPFRD['Body']['Data'][i]['SMARTMETER_ENERGYACTIVE_CONSUMED_SUM_F64']
+        Meters['EnergyActiveProduced'] = jPFRD['Body']['Data'][i]['SMARTMETER_ENERGYACTIVE_PRODUCED_SUM_F64']
+        Meters['EnergyReActiveConsumed'] = jPFRD['Body']['Data'][i]['SMARTMETER_ENERGYREACTIVE_CONSUMED_SUM_F64']
+        Meters['EnergyReActiveProduced'] = jPFRD['Body']['Data'][i]['SMARTMETER_ENERGYREACTIVE_PRODUCED_SUM_F64']
+        Meters['PowerFactorL1'] = jPFRD['Body']['Data'][i]['SMARTMETER_FACTOR_POWER_01_F64']
+        Meters['PowerFactorL2'] = jPFRD['Body']['Data'][i]['SMARTMETER_FACTOR_POWER_02_F64']
+        Meters['PowerFactorL3'] = jPFRD['Body']['Data'][i]['SMARTMETER_FACTOR_POWER_03_F64']
+        Meters['PowerFactorTotal'] = jPFRD['Body']['Data'][i]['SMARTMETER_FACTOR_POWER_SUM_F64']
+        Meters['PowerActiveL1'] = jPFRD['Body']['Data'][i]['SMARTMETER_POWERACTIVE_01_F64']
+        Meters['PowerActiveL2'] = jPFRD['Body']['Data'][i]['SMARTMETER_POWERACTIVE_02_F64']
+        Meters['PowerActiveL3'] = jPFRD['Body']['Data'][i]['SMARTMETER_POWERACTIVE_03_F64']
+        Meters['PowerActiveMeanL1'] = jPFRD['Body']['Data'][i]['SMARTMETER_POWERACTIVE_MEAN_01_F64']
+        Meters['PowerActiveMeanL2'] = jPFRD['Body']['Data'][i]['SMARTMETER_POWERACTIVE_MEAN_02_F64']
+        Meters['PowerActiveMeanL3'] = jPFRD['Body']['Data'][i]['SMARTMETER_POWERACTIVE_MEAN_03_F64']
+        Meters['PowerActiveMeanSum'] = jPFRD['Body']['Data'][i]['SMARTMETER_POWERACTIVE_MEAN_SUM_F64']
+        Meters['PowerApparentL1'] = jPFRD['Body']['Data'][i]['SMARTMETER_POWERAPPARENT_01_F64']
+        Meters['PowerApparentL2'] = jPFRD['Body']['Data'][i]['SMARTMETER_POWERAPPARENT_02_F64']
+        Meters['PowerApparentL3'] = jPFRD['Body']['Data'][i]['SMARTMETER_POWERAPPARENT_03_F64']
+        Meters['PowerApparentSum'] = jPFRD['Body']['Data'][i]['SMARTMETER_POWERAPPARENT_MEAN_SUM_F64']
+        Meters['PowerReActiveL1'] = jPFRD['Body']['Data'][i]['SMARTMETER_POWERREACTIVE_01_F64']
+        Meters['PowerReActiveL2'] = jPFRD['Body']['Data'][i]['SMARTMETER_POWERREACTIVE_02_F64']
+        Meters['PowerReActiveL3'] = jPFRD['Body']['Data'][i]['SMARTMETER_POWERREACTIVE_03_F64']
+        Meters['PowerReActiveMeanSum'] = jPFRD['Body']['Data'][i]['SMARTMETER_POWERREACTIVE_MEAN_SUM_F64']
+        Meters['SmartMeterLocation'] = jPFRD['Body']['Data'][i]['SMARTMETER_VALUE_LOCATION_U16']
+        Meters['VoltageL1'] = jPFRD['Body']['Data'][i]['SMARTMETER_VOLTAGE_01_F64']
+        Meters['VoltageL2'] = jPFRD['Body']['Data'][i]['SMARTMETER_VOLTAGE_02_F64']
+        Meters['VoltageL3'] = jPFRD['Body']['Data'][i]['SMARTMETER_VOLTAGE_03_F64']
+        Meters['VoltageMeanL1'] = jPFRD['Body']['Data'][i]['SMARTMETER_VOLTAGE_MEAN_01_F64']
+        Meters['VoltageMeanL2'] = jPFRD['Body']['Data'][i]['SMARTMETER_VOLTAGE_MEAN_02_F64']
+        Meters['VoltageMeanL3'] = jPFRD['Body']['Data'][i]['SMARTMETER_VOLTAGE_MEAN_03_F64']
+
+
+    return [Meters]
+
 
 
 ### Just Initial Testing Code
@@ -92,8 +160,10 @@ def TestPowerFlowRealtimeData():
     while cnt < 3:
         cnt = cnt + 1
         Site, Inverters = PowerFlowRealtimeData(GetPowerFlowRealtimeData())
+        Meters = MetersRealtimeData(GetMetersRealtimeData())
         pp.pprint(Site)
         pp.pprint(Inverters)
+        pp.pprint(Meters)
         time.sleep(3)
 
 
@@ -117,10 +187,13 @@ def InitPowerFlowRealtimeData(cn):
     dSite.reset_index()
     dInverters = pd.DataFrame(data=Inverters,index=[0])
     dInverters.reset_index()
-    
+    dMeters = pd.DataFrame(data=Inverters,index=[0])
+    dMeters.reset_index()
+
     dSite.to_sql("Site",cn,if_exists="append")
     dInverters.to_sql("Inverters",cn,if_exists="append")
-    return [dSite, dInverters]
+    dMeters.to_sql("Meters",cn,if_exists="append")
+    return [dSite, dInverters, dMeters]
 
 
 
@@ -138,13 +211,16 @@ def writeSQL(cn,cur,table,row):
 def main():
     cn = initSQL()
     cur = cn.cursor()
-    dSite, dInverters = InitPowerFlowRealtimeData(cn)
+    dSite, dInverters, dMeters = InitPowerFlowRealtimeData(cn)
     while True:
         try:
             Site, Inverters = PowerFlowRealtimeData(GetPowerFlowRealtimeData())
             writeSQL(cn,cur,table="Site",row=Site)
             writeSQL(cn,cur,table="Inverters",row=Inverters)
+            writeSQL(cn,cur,table="Meters",row=Meters)
+
             # Loop every 5 seconds
+            print(str(Site['Timestamp']) + ' Load: ' + str(Site['P_Load']) )
             time.sleep(5)
         except:
             time.sleep(60)
@@ -156,7 +232,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+#    main()
+    TestPowerFlowRealtimeData()
 
 
 
