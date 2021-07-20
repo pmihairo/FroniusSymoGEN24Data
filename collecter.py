@@ -4,6 +4,10 @@ import time
 import pandas as pd
 import sqlite3
 import logging
+from influxdb_client import InfluxDBClient
+from influxdb_client.client.write_api import SYNCHRONOUS
+from datetime import datetime
+
 
 # collector.py
 # This will connect to the Fronius Symo and log data to a sqlite
@@ -20,6 +24,12 @@ import logging
 
 
 hostname = "fronius"
+Influx_url = "http://influxdb:8086"
+Influx_token = "6KafZNXsMJYnMEujxgwq8jUqLf7b1IMdvXuZhLL7G3fl5mUhkRJZvQXue0AORJr6DwE7oZ-8JhnePs_3c83pZQ=="
+Influx_org = "Mihais Org"
+Influx_site_bucket = "SiteBucket"
+Influx_meter_bucket = "MeterBucket"
+
 
 def getData(hostname,dataRequest):
     """
@@ -85,6 +95,7 @@ def PowerFlowRealtimeData(jPFRD):
         Site['Meter_Location'] = jPFRD['Body']['Data']['Site']['Meter_Location']
         Site['Mode'] = jPFRD['Body']['Data']['Site']['Mode']
         Site['P_Akku'] = jPFRD['Body']['Data']['Site']['P_Akku']
+# TODO: Make Site(P_Akku) not 'None' 
         Site['P_Grid'] = jPFRD['Body']['Data']['Site']['P_Grid']
         Site['P_Load'] = jPFRD['Body']['Data']['Site']['P_Load']
         Site['P_PV'] = jPFRD['Body']['Data']['Site']['P_PV']
@@ -155,26 +166,28 @@ def MetersRealtimeData(jPFRD):
 
 ### Just Initial Testing Code
 def TestPowerFlowRealtimeData():
+    client = InfluxDBClient(url=Influx_url, token=Influx_token, org=Influx_org)
+    write_api = client.write_api(write_options=SYNCHRONOUS)
+
     pp = pprint.PrettyPrinter(indent=4)
     cnt = 0
     while cnt < 3:
         cnt = cnt + 1
         Site, Inverters = PowerFlowRealtimeData(GetPowerFlowRealtimeData())
         Meters = MetersRealtimeData(GetMetersRealtimeData())
-        pp.pprint(Site)
-        pp.pprint(Inverters)
-        pp.pprint(Meters)
-        time.sleep(3)
+#        pp.pprint(Site)
+#        pp.pprint(Inverters)
+#        pp.pprint(Meters)
+        print (str(Site))
 
+
+        time.sleep(3)
 
 
 
 def initSQL():
     cn = sqlite3.connect("Fronius.sqlite")
     return cn
-
-
-
 
 def InitPowerFlowRealtimeData(cn):
 
@@ -195,9 +208,6 @@ def InitPowerFlowRealtimeData(cn):
     dMeters.to_sql("Meters",cn,if_exists="append")
     return [dSite, dInverters, dMeters]
 
-
-
-
 def writeSQL(cn,cur,table,row):
     columns = ', '.join(row.keys())
     placeholders = ':'+', :'.join(row.keys())
@@ -205,16 +215,15 @@ def writeSQL(cn,cur,table,row):
     cur.execute(query, row)
     cn.commit()
 
-
-
-
-def main():
+def mainDB():
     cn = initSQL()
     cur = cn.cursor()
     dSite, dInverters, dMeters = InitPowerFlowRealtimeData(cn)
     while True:
         try:
             Site, Inverters = PowerFlowRealtimeData(GetPowerFlowRealtimeData())
+            Meters = MetersRealtimeData(GetMetersRealtimeData())
+
             writeSQL(cn,cur,table="Site",row=Site)
             writeSQL(cn,cur,table="Inverters",row=Inverters)
             writeSQL(cn,cur,table="Meters",row=Meters)
@@ -227,13 +236,111 @@ def main():
             print("sleeping")
     cn.close()
         
+def main():
+    client = InfluxDBClient(url=Influx_url, token=Influx_token, org=Influx_org)
+    write_api = client.write_api(write_options=SYNCHRONOUS)
 
+    while True:
+        try:
+            Site, Inverters = PowerFlowRealtimeData(GetPowerFlowRealtimeData())
+            now = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+            write_api.write(Influx_site_bucket, Influx_org, 
+                [{
+                "measurement": "SiteValues", 
+                "tags": {"location": "home", "Version": Site['Version']}, 
+                "fields": 
+                    {
+                    "P_Akku": Site['P_Akku'], 
+                    "P_Grid": Site['P_Grid'], 
+                    "P_PV": Site['P_PV'], 
+                    "P_Load": Site['P_Load'],
+                    "rel_Autonomy": Site['rel_Autonomy'],
+                    "rel_SelfConsumption": Site['rel_SelfConsumption']
+                    }, 
+                "time": str(now)}
+                ])
+            time.sleep(2)
 
+            Meters = MetersRealtimeData(GetMetersRealtimeData())
+
+            for i in range(len(Meters)):
+                now = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                write_api.write(Influx_meter_bucket, Influx_org, 
+                    [{
+                    "measurement": "MeterValues", 
+                    "tags": 
+                        {
+                        "location": "home", 
+                        "MeterManufacturer": Meters[i]['Manufacturer'], 
+                        "MeterModel": Meters[i]['Model'], 
+                        "MeterSerial": Meters[i]['Serial']                    }, 
+                    "fields": 
+                        {
+                        "Current_L1": Meters[i]['Current_L1'], 
+                        "Current_L2": Meters[i]['Current_L2'], 
+                        "Current_L3": Meters[i]['Current_L3'], 
+                        "Current_Total": Meters[i]['Current_Total'], 
+
+                        "Voltage_L12": Meters[i]['Voltage_L12'], 
+                        "Voltage_L23": Meters[i]['Voltage_L23'], 
+                        "Voltage_L31": Meters[i]['Voltage_L31'], 
+
+                        "Grid_Frequency": Meters[i]['Grid_Frequency'], 
+
+                        "EnergyActiveMinus": Meters[i]['EnergyActiveMinus'], 
+                        "EnergyActivePlus": Meters[i]['EnergyActivePlus'], 
+
+                        "EnergyActiveConsumed": Meters[i]['EnergyActiveConsumed'], 
+                        "EnergyActiveProduced": Meters[i]['EnergyActiveProduced'], 
+
+                        "EnergyReActiveConsumed": Meters[i]['EnergyReActiveConsumed'], 
+                        "EnergyReActiveProduced": Meters[i]['EnergyReActiveProduced'], 
+
+                        "PowerFactorL1": Meters[i]['PowerFactorL1'], 
+                        "PowerFactorL2": Meters[i]['PowerFactorL2'], 
+                        "PowerFactorL3": Meters[i]['PowerFactorL3'], 
+                        "PowerFactorTotal": Meters[i]['PowerFactorTotal'], 
+
+                        "PowerActiveL1": Meters[i]['PowerActiveL1'], 
+                        "PowerActiveL2": Meters[i]['PowerActiveL2'], 
+                        "PowerActiveL3": Meters[i]['PowerActiveL3'], 
+
+                        "PowerActiveMeanL1": Meters[i]['PowerActiveMeanL1'], 
+                        "PowerActiveMeanL2": Meters[i]['PowerActiveMeanL2'], 
+                        "PowerActiveMeanL3": Meters[i]['PowerActiveMeanL3'], 
+                        "PowerActiveMeanSum": Meters[i]['PowerActiveMeanSum'], 
+
+                        "PowerApparentL1": Meters[i]['PowerApparentL1'], 
+                        "PowerApparentL2": Meters[i]['PowerApparentL2'], 
+                        "PowerApparentL3": Meters[i]['PowerApparentL3'], 
+                        "PowerApparentSum": Meters[i]['PowerApparentSum'], 
+
+                        "PowerReActiveL1": Meters[i]['PowerReActiveL1'], 
+                        "PowerReActiveL2": Meters[i]['PowerReActiveL2'], 
+                        "PowerReActiveL3": Meters[i]['PowerReActiveL3'], 
+                        "PowerReActiveMeanSum": Meters[i]['PowerReActiveMeanSum'], 
+
+                        "VoltageL1": Meters[i]['VoltageL1'], 
+                        "VoltageL2": Meters[i]['VoltageL2'], 
+                        "VoltageL3": Meters[i]['VoltageL3'], 
+
+                        "VoltageMeanL1": Meters[i]['VoltageMeanL1'], 
+                        "VoltageMeanL2": Meters[i]['VoltageMeanL2'], 
+                        "VoltageMeanL3": Meters[i]['VoltageMeanL3']
+
+                        }, 
+                    "time": str(now)}
+                    ])            
+            time.sleep(3)
+        except:
+            time.sleep(60)
+            print("sleeping")
 
 
 if __name__ == "__main__":
-#    main()
-    TestPowerFlowRealtimeData()
+#    mainDB()
+    main()
+#    TestPowerFlowRealtimeData()
 
 
 
