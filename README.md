@@ -15,3 +15,6 @@ ToDo:
 
 Based off https://github.com/lxrocks/fronius (Thanks!!)
 # FroniusSymoGEN24Data
+
+Pretty graph sample: 
+![image](https://user-images.githubusercontent.com/6340168/126523337-6e7c55f4-8a88-4c99-aa53-b3a81b66316e.png)
